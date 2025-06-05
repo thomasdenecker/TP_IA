@@ -1,0 +1,190 @@
+###############################
+# Image & services
+###############################
+
+image: python:3.10
+
+###############################
+# Stages
+###############################
+
+stages:
+  - 💎 quality
+  - 🛡️ security
+  - 🤖 tests
+  - 📤 release
+  - 🚀 deployment
+
+###############################
+# 💎 Quality
+###############################
+
+#==============================
+# Code audit
+#==============================
+
+Code audit (ruff):
+  stage: 💎 quality
+  image: python:3.10
+  before_script:
+    - pip install --upgrade pip
+    - pip install -e ".[dev]"
+  script:
+    - ruff check . 
+    - ruff format --check .
+  only:
+    - merge_requests
+  tags:
+    - docker
+    - ifb
+    - igbmc
+
+###############################
+# 🛡️ security
+###############################
+
+#====================================
+# Dependencies vulnerability (safety)
+#====================================
+
+Dependencies vulnerability (safety):
+  stage: 🛡️ security
+  image: mambaorg/micromamba:bullseye-slim
+  before_script:
+    - micromamba clean --all
+    - micromamba install -c conda-forge python=3.10 zeroc-ice=3.6.5 compilers
+      openldap
+    - pip install -e ".[all]"
+  script:
+    - safety check --ignore 75744
+  only:
+    - merge_requests
+  tags:
+    - docker
+    - ifb
+    - igbmc
+
+#==============================
+# Security breach (bandit)
+#==============================
+
+Security breach (bandit):
+  stage: 🛡️ security
+  image: python:3.10
+  before_script:
+    - pip install --upgrade pip
+    - pip install -e ".[dev]"
+  script:
+    - bandit -c pyproject.toml -r madbot_api
+  only:
+    - merge_requests
+  tags:
+    - docker
+    - ifb
+    - igbmc
+
+###############################
+# 🤖 tests
+###############################
+
+#==============================
+# Functionnal tests
+#==============================
+
+Functionnal tests:
+  stage: 🤖 tests
+  image: mambaorg/micromamba:bullseye-slim
+  before_script:
+    - micromamba install -y -n base -f dev-env.yml
+    - pip install -e ".[galaxy,sshfs,dev]"
+  script:
+    - madbot test
+  only:
+    - merge_requests
+  tags:
+    - docker
+    - ifb
+    - igbmc
+
+###############################
+# 📤  release
+###############################
+
+#==============================
+# Test build
+#==============================
+
+Test build:
+  stage: 📤 release
+  image: python:3.10
+  before_script:
+    - pip install --upgrade pip
+    - pip install build
+  script:
+    - python -m build
+  only:
+    - merge_requests
+  tags:
+    - docker
+    - ifb
+    - igbmc
+
+#==============================
+# Semantic release
+#==============================
+
+Semantic release:
+  stage: 📤 release
+  image: node:20.11.0-alpine
+  before_script:
+    - apk add python3 py3-pip git libffi-dev musl-dev python3-dev gcc
+    - pip install --upgrade pip setuptools twine importlib-metadata pkginfo
+    - npm install -g semantic-release@24.0.0 @semantic-release/gitlab@13.1.0
+      @semantic-release/changelog@6.0.3 conventional-changelog-conventionalcommits@8.0.0
+      @semantic-release/commit-analyzer@13.0.0 @semantic-release/git@10.0.1
+      semantic-release-replace-plugin@1.2.7 semantic-release-pypi@5.0.0
+  variables:
+    PYPI_REPO_URL: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi
+    PYPI_USERNAME: gitlab-ci-token
+    PYPI_TOKEN: ${CI_JOB_TOKEN}
+    PIP_BREAK_SYSTEM_PACKAGES: 1
+  script:
+    - semantic-release --debug
+  tags:
+    - docker
+    - ifb
+    - igbmc
+  only:
+    - dev
+    - main
+  artifacts:
+    paths:
+      - pyproject.toml
+
+Docker Image:
+  stage: 📤 release
+  image: docker:latest
+  services:
+    - docker:dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ''
+  before_script:
+    - docker info
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+  script:
+    - export MADBOT_API_VERSION=$(grep -m 1 version pyproject.toml | tr -s ' ' |
+      tr -d '"' | tr -d "'" | cut -d' ' -f3)
+    - docker build --pull --no-cache -t "$CI_REGISTRY_IMAGE:$MADBOT_API_VERSION"
+      .
+    - docker push "$CI_REGISTRY_IMAGE:$MADBOT_API_VERSION"
+  tags:
+    - docker
+    - ifb
+    - igbmc
+  only:
+    - dev
+    - main
+  needs:
+    - job: Semantic release
+      artifacts: true
