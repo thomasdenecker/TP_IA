@@ -1,0 +1,5 @@
+# requirements.txt
+ruff
+bandit
+safety
+pytest
