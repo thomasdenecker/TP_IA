@@ -1,7 +1,7 @@
 [project]
-name = "IA Project"
+name = "myproject"
 version = "0.1.0"
-description = "An AI project for testing and development"
+description = "My awesome project"
 requires-python = ">=3.11"
 
 dependencies = [
